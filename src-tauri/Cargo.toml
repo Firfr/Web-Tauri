@@ -1,0 +1,53 @@
+# 包元数据配置区
+[package]
+# 包名称
+name = "web-tauri"
+# 包版本
+version = "0.1.0"
+# 包描述
+description = "静态网站转exe应用程序"
+# 包作者
+authors = ["B站 秦曱凧"]
+# Rust版本
+edition = "2021"
+
+[[bin]]
+name = "Web-Tauri-秦曱凧"
+path = "src/main.rs"
+
+# 库配置区
+[lib]
+# 库名字
+name = "web_tauri_lib"
+# 库类型，包含静态库、动态库和rlib
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# 构建时依赖区
+[build-dependencies]
+# Tauri构建依赖
+tauri-build = { version = "2", features = [] }
+
+# 运行时依赖区
+[dependencies]
+# Tauri核心依赖，启用开发者工具功能
+tauri = { version = "2", features = ["devtools"] }
+# 提供安全的外部链接打开功能
+tauri-plugin-opener = "2"
+# Serde序列化库，启用派生功能
+serde = { version = "1", features = ["derive"] }
+# Serde JSON库
+serde_json = "1"
+# Tokio异步运行时，启用完整功能
+tokio = { version = "1", features = ["full"] }
+# Hyper HTTP库
+hyper = { version = "1.4", features = ["full"] }
+# HTTP消息体工具库
+http-body-util = "0.1"
+# Bytes字节操作库
+bytes = "1.6"
+# Tower服务库，启用工具功能
+tower = { version = "0.5", features = ["util"] }
+# Hyper工具库，启用Tokio支持
+hyper-util = { version = "0.1", features = ["tokio"] }
+# 随机数生成库
+rand = "0.8"
