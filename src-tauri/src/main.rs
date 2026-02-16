@@ -8,6 +8,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     // 导入路径处理类型
     path::PathBuf,
+    // 导入环境变量和命令行参数
+    env,
 };
 // 导入Tauri的Manager trait
 use tauri::Manager;
@@ -34,9 +36,27 @@ use rand::Rng;
 #[tokio::main]
 // 定义main函数，返回Result类型
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 解析命令行参数获取端口
+    let specified_port = parse_port_from_args();
+    
     // 启动静态文件服务器部分开始
-    // 尝试绑定到随机端口直到找到可用的
-    let (addr, listener) = find_available_random_port().await?;
+    // 如果指定了端口，先尝试使用指定端口，否则使用随机端口
+    let (addr, listener) = if let Some(port) = specified_port {
+        match bind_to_specific_port(port).await {
+            Ok(result) => {
+                println!("✅ 使用指定端口: {}", port);
+                result
+            },
+            Err(e) => {
+                eprintln!("⚠️  指定端口 {} 不可用: {}", port, e);
+                eprintln!("🔄 切换到随机端口...");
+                find_available_random_port().await?
+            }
+        }
+    } else {
+        println!("🔄 未指定端口，使用随机端口...");
+        find_available_random_port().await?
+    };
 
     // 获取可执行文件路径并构造静态资源根目录
     let exe_path = std::env::current_exe()
@@ -94,6 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let window = app.get_webview_window("main").expect("无法获取主窗口");
             // 导航到本地HTTP服务器，使用找到的随机端口
             let _ = window.navigate(format!("http://127.0.0.1:{}", port).parse().unwrap());
+            // 设置窗口标题，包含端口号
+            let _ = window.set_title(&format!("Web-Tauri-秦曱凧 | {}", port));
             // 返回成功结果
             Ok(())
         })
@@ -284,4 +306,47 @@ fn forbidden_response() -> Result<Response<Full<Bytes>>, Infallible> {
         .body(Full::from("403 Forbidden"))
         // 解包结果
         .unwrap())
+}
+
+// 解析命令行参数获取端口
+fn parse_port_from_args() -> Option<u16> {
+    let args: Vec<String> = env::args().collect();
+    
+    // 遍历参数寻找端口参数
+    for i in 1..args.len() {
+        let arg = &args[i];
+        
+        // 支持多种参数格式：
+        // --port 8080
+        // -p 8080
+        // --port=8080
+        // -p=8080
+        
+        if arg == "--port" || arg == "-p" {
+            if i + 1 < args.len() {
+                if let Ok(port) = args[i + 1].parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        } else if arg.starts_with("--port=") {
+            let port_str = &arg[7..]; // 跳过 "--port=" 前缀
+            if let Ok(port) = port_str.parse::<u16>() {
+                return Some(port);
+            }
+        } else if arg.starts_with("-p=") {
+            let port_str = &arg[3..]; // 跳过 "-p=" 前缀
+            if let Ok(port) = port_str.parse::<u16>() {
+                return Some(port);
+            }
+        }
+    }
+    
+    None
+}
+
+// 绑定到指定端口的函数
+async fn bind_to_specific_port(port: u16) -> Result<(SocketAddr, TcpListener), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let listener = TcpListener::bind(&addr).await?;
+    Ok((addr, listener))
 }
