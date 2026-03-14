@@ -1,12 +1,20 @@
 {
   "name": "web-tauri",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check": "cd src-tauri && cargo check",
+    "ck": "npm run check",
+    "check:release": "cd src-tauri && cargo check --release",
+    "chr": "npm run check:release",
+    "clippy": "cd src-tauri && cargo clippy",
+    "cy": "npm run clippy",
+    "format": "cd src-tauri && cargo fmt",
+    "fmt": "npm run format"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.9.6"
+    "@tauri-apps/cli": "^2"
   }
 }

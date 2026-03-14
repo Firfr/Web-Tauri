@@ -3,26 +3,28 @@
   "productName": "Web-Tauri-秦曱凧",
   "version": "0.1.0",
   "identifier": "com.win.web-tauri",
+  "plugins": {
+    "webview": {
+      "browser_args": [
+        "--ignore-certificate-errors",
+        "--allow-running-insecure-content",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor"
+      ]
+    }
+  },
   "build": {
     "frontendDist": "../代码"
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Web-Tauri-秦曱凧",
-        "width": 1200,
-        "height": 900
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
   },
   "bundle": {
     "active": false,
-    "targets": "all",
     "icon": [
       "icons/icon.ico"
     ]

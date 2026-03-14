@@ -27,6 +27,22 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # Tauri构建依赖
 tauri-build = { version = "2", features = [] }
 
+	# ========== 编译优化配置部分 ==========
+# 用于控制生产环境（release 模式）下的编译行为
+[profile.release]
+# 启用链接时优化，显著减小体积但增加编译时间
+lto = true
+# 移除调试符号
+debug = false
+# 移除未使用的代码段
+codegen-units = 1
+# 激进优化级别
+opt-level = 3
+# 自动移除未使用的 crate 和函数
+panic = "abort"
+# 剥离所有符号信息
+strip = true
+
 # 运行时依赖区
 [dependencies]
 # Tauri核心依赖，启用开发者工具功能
@@ -51,3 +67,7 @@ tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 # 随机数生成库
 rand = "0.8"
+# URL 百分号编码解码库
+percent-encoding = "2.3"
+	# 添加位图处理库用来设置图标
+image = "0.25"

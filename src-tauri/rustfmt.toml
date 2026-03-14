@@ -1,0 +1,4 @@
+# 使用 2 个空格进行缩进
+tab_spaces = 2
+# 确保使用空格而不是 Tab
+hard_tabs = false
