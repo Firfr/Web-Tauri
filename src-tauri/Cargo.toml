@@ -3,7 +3,7 @@
 # 包名称
 name = "web-tauri"
 # 包版本
-version = "0.1.0"
+version = "1.3.0"
 # 包描述
 description = "静态网站转exe应用程序"
 # 包作者
@@ -49,6 +49,8 @@ strip = true
 tauri = { version = "2", features = ["devtools"] }
 # 提供安全的外部链接打开功能
 tauri-plugin-opener = "2"
+# 添加对话框插件支持
+tauri-plugin-dialog = "2"
 # Serde序列化库，启用派生功能
 serde = { version = "1", features = ["derive"] }
 # Serde JSON库
@@ -67,6 +69,10 @@ tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 # 随机数生成库
 rand = "0.8"
+# URL 解析库
+url = "2"
+# URL 编码解码库
+urlencoding = "2"
 # URL 百分号编码解码库
 percent-encoding = "2.3"
 	# 添加位图处理库用来设置图标

@@ -2,7 +2,6 @@
 
 // 定义标准库中需要的类型
 use std::{
-  convert::Infallible,                 // 用于错误处理的类型
   env,                                 // 访问环境变量和命令行参数
   fs,                                  // 文件系统操作（如果实际使用了）
   net::{IpAddr, Ipv4Addr, SocketAddr}, // IPv4 地址和网络套接字类型
@@ -11,29 +10,29 @@ use std::{
 // 导入 Tauri 的核心组件：WebviewUrl 和 WebviewWindowBuilder
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
-// 导入Hyper库相关组件用于HTTP服务器
+// 导入 Hyper 库相关组件用于 HTTP 服务器
 use hyper::{
-  // 导入HTTP连接相关组件
+  // 导入 HTTP 连接相关组件
   server::conn::http1,
   // 导入服务函数
   service::service_fn,
-  // 导入Request、Response和状态码
-  Request,
-  Response,
-  StatusCode,
 };
-// 导入HTTP消息体工具
-use http_body_util::Full;
-// 导入字节操作
-use bytes::Bytes;
-// 导入TCP监听器
-use tokio::net::TcpListener;
-// 导入随机数生成
+
+// 随机数生成器
 use rand::Rng;
+
+// 导入 TCP 监听器
+use tokio::net::TcpListener;
+
+// 导入 HTTP 服务器模块
+mod http_server;
+
+// 导入下载处理模块
+mod http_download;
 
 // 主异步函数入口点
 #[tokio::main]
-// 定义main函数，返回Result类型
+// 定义 main 函数，返回 Result 类型
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   #[cfg(debug_assertions)]
   println!("获取可执行文件所在路径");
@@ -43,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let exe_dir = exe_path.parent().expect("无法获取可执行文件所在目录");
 
   #[cfg(debug_assertions)]
-  println!("可执行文件所在路径: {:?}", exe_path);
+  println!("可执行文件所在路径：{:?}", exe_path);
 
   #[cfg(debug_assertions)]
   println!("确保可执行文件所在目录下有 \"代码\" 目录");
@@ -83,19 +82,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // 保存端口号，以便在 setup 闭包中使用
   let port = addr.port();
 
-  // 启动HTTP服务器作为后台任务
+  // 启动 HTTP 服务器作为后台任务
   let static_root_clone = static_root.clone();
-  // 创建异步任务来运行HTTP服务器
+  // 创建异步任务来运行 HTTP 服务器
   tokio::spawn(async move {
     // 仅在调试模式下输出服务器启动信息
     #[cfg(debug_assertions)]
-    println!("🚀 HTTP服务器已启动在 http://{}", addr);
+    println!("🚀 HTTP 服务器已启动在 http://{}", addr);
 
     // 循环接受新连接
     loop {
-      // 接受新的TCP连接
+      // 接受新的 TCP 连接
       let (stream, _) = listener.accept().await.unwrap();
-      // 包装流以用于Hyper
+      // 包装流以用于 Hyper
       let io = hyper_util::rt::TokioIo::new(stream);
 
       // 克隆静态根目录以供任务使用
@@ -103,18 +102,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
       // 为每个连接创建一个异步任务
       tokio::task::spawn(async move {
-        // 使用HTTP/1.1协议处理连接
+        // 使用 HTTP/1.1 协议处理连接
         if let Err(_err) = http1::Builder::new()
           .serve_connection(
             io,
-            service_fn(move |req| serve_static(req, static_root.clone())),
+            service_fn(move |req| http_server::serve_static(req, static_root.clone())),
           )
           .with_upgrades()
           .await
         {
           // 仅在调试模式下输出错误信息
           #[cfg(debug_assertions)]
-          eprintln!("连接错误: {:?}", _err);
+          eprintln!("连接错误：{:?}", _err);
         }
       });
     }
@@ -179,10 +178,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("环境变量已设置：{}", data_dir.to_str().unwrap());
   }
 
-  // 创建Tauri应用部分开始
-  // 初始化Tauri构建器
-  tauri::Builder::default()
-    // 设置函数，在应用初始化时执行，使用move关键字以获取所有权
+  // 创建 Tauri 应用部分开始
+  let builder = tauri::Builder::default()
+    // 添加对话框插件
+    .plugin(tauri_plugin_dialog::init());
+
+  builder
+    // 设置函数，在应用初始化时执行，使用 move 关键字以获取所有权
     .setup(move |app| {
       let parsed_url = format!("http://127.0.0.1:{}", port).parse().unwrap();
       #[cfg(debug_assertions)]
@@ -190,9 +192,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
       #[cfg(debug_assertions)]
       println!("创建窗口并设置大小标题");
+
+      let handle = app.handle().clone();
       let mut _window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(parsed_url))
         .title(format!("{} | {}", title, port))
-        .inner_size(1200.0, 900.0);
+        .inner_size(1200.0, 900.0)
+        // 设置下载事件处理器
+        .on_download(http_download::create_download_handler(handle));
 
       if !icon_path_str.is_empty() && Path::new(&icon_path_str).exists() {
         #[cfg(debug_assertions)]
@@ -344,6 +350,55 @@ fn get_port_form_args() -> Option<u16> {
   None
 }
 
+// 查找可用端口
+async fn find_available_random_port(
+) -> Result<(SocketAddr, TcpListener), Box<dyn std::error::Error + Send + Sync>> {
+  let mut rng = rand::thread_rng();
+
+  // 尝试最多 10 次找到可用端口
+  #[cfg(debug_assertions)]
+  println!("🔄 随机生成的端口，尝试最多 10 次");
+  for _ in 0..10 {
+    // 生成大于 1024 的随机端口（范围：1025-65535）
+    let port = rng.gen_range(1025..=65535);
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+
+    match TcpListener::bind(&addr).await {
+      Ok(listener) => {
+        #[cfg(debug_assertions)]
+        println!("🔄 尝试绑定使用端口 {} ", port);
+        return Ok((addr, listener));
+      }
+      Err(_) => {
+        #[cfg(debug_assertions)]
+        println!("🔄 端口 {} 不可用，在次随机生成一个", port);
+        continue;
+      }
+    }
+  }
+
+  // 如果随机尝试失败，回退到顺序查找
+  #[cfg(debug_assertions)]
+  println!("🔄 随机尝试失败，到顺序查找端口");
+  for port in 1025..=65535 {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    match TcpListener::bind(&addr).await {
+      Ok(listener) => {
+        #[cfg(debug_assertions)]
+        println!("🔄 尝试绑定使用端口 {} ", port);
+        return Ok((addr, listener));
+      }
+      Err(_) => {
+        #[cfg(debug_assertions)]
+        println!("🔄 端口 {} 不可用，尝试下一个", port);
+        continue;
+      }
+    }
+  }
+
+  Err("无法找到可用端口".into())
+}
+
 // 从配置文件读取端口
 fn read_config_port(config_path: &PathBuf) -> Option<u16> {
   // 读取配置文件内容
@@ -388,55 +443,6 @@ fn read_config_port(config_path: &PathBuf) -> Option<u16> {
   }
 }
 
-// 查找可用端口
-async fn find_available_random_port(
-) -> Result<(SocketAddr, TcpListener), Box<dyn std::error::Error + Send + Sync>> {
-  let mut rng = rand::thread_rng();
-
-  // 尝试最多10次找到可用端口
-  #[cfg(debug_assertions)]
-  println!("🔄 随机生成的端口，尝试最多10次");
-  for _ in 0..10 {
-    // 生成大于1024的随机端口（范围：1025-65535）
-    let port = rng.gen_range(1025..=65535);
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-
-    match TcpListener::bind(&addr).await {
-      Ok(listener) => {
-        #[cfg(debug_assertions)]
-        println!("🔄 尝试绑定使用端口 {} ", port);
-        return Ok((addr, listener));
-      }
-      Err(_) => {
-        #[cfg(debug_assertions)]
-        println!("🔄 端口 {} 不可用，在次随机生成一个", port);
-        continue;
-      }
-    }
-  }
-
-  // 如果随机尝试失败，回退到顺序查找
-  #[cfg(debug_assertions)]
-  println!("🔄 随机尝试失败，到顺序查找端口");
-  for port in 1025..=65535 {
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    match TcpListener::bind(&addr).await {
-      Ok(listener) => {
-        #[cfg(debug_assertions)]
-        println!("🔄 尝试绑定使用端口 {} ", port);
-        return Ok((addr, listener));
-      }
-      Err(_) => {
-        #[cfg(debug_assertions)]
-        println!("🔄 端口 {} 不可用，尝试下一个", port);
-        continue;
-      }
-    }
-  }
-
-  Err("无法找到可用端口".into())
-}
-
 // 图标加载
 #[cfg(target_os = "windows")]
 fn load_icon_from_file<P: AsRef<Path>>(
@@ -456,163 +462,4 @@ fn load_icon_from_file<P: AsRef<Path>>(
   let slice: &'static [u8] = Box::leak(rgba_data.into_boxed_slice());
 
   Ok(tauri::image::Image::new(slice, width, height))
-}
-
-// 静态文件服务函数，处理HTTP请求
-async fn serve_static(
-  // HTTP请求参数
-  req: Request<hyper::body::Incoming>,
-  // 静态文件根目录路径
-  base_path: PathBuf,
-) -> Result<Response<Full<Bytes>>, Infallible> {
-  // 获取请求的URI路径
-  let url_path = req.uri().path();
-
-  // 对 URL 路径进行百分号解码，处理中文等非 ASCII 字符
-  let decoded_path = percent_encoding::percent_decode_str(url_path)
-    .decode_utf8()
-    .unwrap_or_else(|_| url_path.into());
-
-  // 调试信息：输出请求的路径
-  // #[cfg(debug_assertions)]
-  // println!("请求路径: {}", decoded_path);
-
-  // 处理根路径并清理URL路径
-  let clean_path = if decoded_path == "/" {
-    // 如果是根路径，则映射到index.html
-    "index.html".to_string()
-  } else {
-    // 否则移除路径开头的斜杠
-    decoded_path.trim_start_matches('/').to_string()
-  };
-
-  // 构造完整文件路径
-  let file_path = base_path.join(&clean_path);
-
-  // 调试信息：输出实际文件路径
-  // #[cfg(debug_assertions)]
-  // println!("实际文件路径: {:?}", file_path);
-
-  // 检查路径是否在基础目录内，防止路径穿越攻击
-  if !file_path.starts_with(&base_path) {
-    // 如果路径不在基础目录内，返回禁止访问响应
-    return forbidden_response(&file_path);
-  }
-
-  // 检查文件是否存在
-  if !file_path.exists() {
-    // 如果文件不存在，返回404响应
-    return not_found_response(&file_path);
-  }
-
-  // 读取文件内容
-  match tokio::fs::read(&file_path).await {
-    // 成功读取文件
-    Ok(contents) => {
-      // 将内容包装为Full<Bytes>类型
-      let body = Full::from(contents);
-      // 根据文件扩展名确定内容类型
-      let content_type = match file_path.extension().and_then(|ext| ext.to_str()) {
-        // HTML文件类型
-        Some("html") | Some("htm") => "text/html",
-        // CSS样式文件类型
-        Some("css") => "text/css",
-        // JavaScript文件类型
-        Some("js") => "application/javascript",
-        // JSON文件类型
-        Some("json") => "application/json",
-        // PNG图片类型
-        Some("png") => "image/png",
-        // JPEG图片类型
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        // GIF图片类型
-        Some("gif") => "image/gif",
-        // SVG图片类型
-        Some("svg") => "image/svg+xml",
-        // ICO图标类型
-        Some("ico") => "image/x-icon",
-        // WOFF字体类型
-        Some("woff") => "font/woff",
-        // WOFF2字体类型
-        Some("woff2") => "font/woff2",
-        // TTF字体类型
-        Some("ttf") => "font/ttf",
-        // EOT字体类型
-        Some("eot") => "application/vnd.ms-fontobject",
-        // 默认文本类型
-        _ => "text/plain",
-      };
-
-      // 调试信息：输出成功返回的文件及类型
-      // #[cfg(debug_assertions)]
-      // println!("成功返回文件: {:?}, 类型: {}", file_path, content_type);
-
-      // 构造成功响应，添加缓存控制头
-      Ok(
-        Response::builder()
-          // 设置状态码为200 OK
-          .status(StatusCode::OK)
-          // 设置内容类型头部
-          .header("Content-Type", content_type)
-          // 设置CORS头部允许所有来源
-          .header("Access-Control-Allow-Origin", "*")
-          // 添加缓存控制头，防止浏览器缓存
-          .header("Cache-Control", "no-cache, no-store, must-revalidate")
-          .header("Pragma", "no-cache")
-          .header("Expires", "0")
-          // 设置响应体
-          .body(body)
-          // 解包结果
-          .unwrap(),
-      )
-    }
-    // 读取文件失败
-    Err(_) => not_found_response(&file_path),
-  }
-}
-
-// 返回404未找到响应
-fn not_found_response(_file_path: &std::path::Path) -> Result<Response<Full<Bytes>>, Infallible> {
-  // 调试信息：输出返回404
-  #[cfg(debug_assertions)]
-  println!("❌ 404 - 文件不存在：{:?}", _file_path);
-  // 构造404响应
-  Ok(
-    Response::builder()
-      // 设置状态码为404
-      .status(StatusCode::NOT_FOUND)
-      // 设置内容类型为纯文本
-      .header("Content-Type", "text/plain")
-      // 设置缓存控制头
-      .header("Cache-Control", "no-cache, no-store, must-revalidate")
-      .header("Pragma", "no-cache")
-      .header("Expires", "0")
-      // 设置响应体内容
-      .body(Full::from("404 Not Found"))
-      // 解包结果
-      .unwrap(),
-  )
-}
-
-// 返回403禁止访问响应
-fn forbidden_response(_file_path: &std::path::Path) -> Result<Response<Full<Bytes>>, Infallible> {
-  // 调试信息：输出返回403
-  #[cfg(debug_assertions)]
-  println!("❌ 403 - 文件禁止访问：{:?}", _file_path);
-  // 构造403响应
-  Ok(
-    Response::builder()
-      // 设置状态码为403
-      .status(StatusCode::FORBIDDEN)
-      // 设置内容类型为纯文本
-      .header("Content-Type", "text/plain")
-      // 设置缓存控制头
-      .header("Cache-Control", "no-cache, no-store, must-revalidate")
-      .header("Pragma", "no-cache")
-      .header("Expires", "0")
-      // 设置响应体内容
-      .body(Full::from("403 Forbidden"))
-      // 解包结果
-      .unwrap(),
-  )
 }
